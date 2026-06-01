@@ -18,12 +18,12 @@ namespace DEMO
         private PictureBox[] targets = new PictureBox[4];
         private int[] targetContents = new int[4];
         private Label lblCaptchaStatus;
-        private int failCount = 0;
+        private int consecutiveFailures = 0;
 
         private DataGridView dgvUsers;
-        private TextBox txtNewLogin, txtNewPassword;
+        private TextBox txtNewLogin, txtNewPassword, txtSearch;
         private ComboBox cmbNewRole;
-        private Button btnAddUser, btnUnblockUser, btnRefreshUsers, btnAdminLogout, btnEditPassword;
+        private Button btnAddUser, btnUnblockUser, btnRefreshUsers, btnAdminLogout, btnEditPassword, btnSearch, btnExport;
 
         private Label lblWelcome;
         private Button btnUserLogout;
@@ -34,11 +34,20 @@ namespace DEMO
 
         public MainForm()
         {
-            this.Text = "ООО \"Бургер плюс\" - Информационная система";
-            this.Size = new Size(1000, 750);
-            this.MinimumSize = new Size(800, 600);
+            this.Text = "ООО Бургер плюс - Информационная система";
+            this.Size = new Size(1000, 800);
+            this.MinimumSize = new Size(950, 750);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.Sizable;
+
+            // Создание папки для капчи, если её нет
+            string captchaDir = Path.Combine(Application.StartupPath, "CaptchaImages");
+            if (!Directory.Exists(captchaDir))
+            {
+                Directory.CreateDirectory(captchaDir);
+                MessageBox.Show("Создана папка CaptchaImages. Поместите туда файлы 1.png, 2.png, 3.png, 4.png",
+                    "Внимание", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
 
             users = new List<User>
             {
@@ -55,7 +64,7 @@ namespace DEMO
         private bool IsValidLogin(string login)
         {
             if (string.IsNullOrEmpty(login)) return false;
-            return Regex.IsMatch(login, @"^[a-zA-Z0-9а-яА-ЯёЁ\.\-_]+$");
+            return Regex.IsMatch(login, @"^[a-zA-Z0-9а-яА-ЯёЁ._-]+$");
         }
 
         private bool ValidateUser(string login, string password, out string role, out bool isBlocked)
@@ -87,9 +96,9 @@ namespace DEMO
         private void AddUser(string login, string password, string role)
         {
             if (users.Any(u => u.Login == login))
-                throw new Exception("Пользователь с таким логином уже существует!");
+                throw new Exception("Пользователь с таким логином уже существует");
             if (!IsValidLogin(login))
-                throw new Exception("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания!");
+                throw new Exception("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания");
             users.Add(new User { Login = login, Password = password, Role = role, IsBlocked = false });
         }
 
@@ -101,9 +110,81 @@ namespace DEMO
 
         private void LoadUsersToGrid()
         {
-            var list = users.Select(u => new { Логин = u.Login, Роль = u.Role, Заблокирован = u.IsBlocked ? "Да" : "Нет" }).ToList();
+            var list = users.Select(u => new {
+                Логин = u.Login,
+                Роль = u.Role,
+                Заблокирован = u.IsBlocked ? "Да" : "Нет"
+            }).ToList();
             dgvUsers.DataSource = null;
             dgvUsers.DataSource = list;
+        }
+
+        private void BtnSearch_Click(object sender, EventArgs e)
+        {
+            string searchText = txtSearch.Text.Trim().ToLower();
+            if (string.IsNullOrEmpty(searchText))
+            {
+                LoadUsersToGrid();
+                return;
+            }
+            var filtered = users.Where(u => u.Login.ToLower().Contains(searchText))
+                .Select(u => new {
+                    Логин = u.Login,
+                    Роль = u.Role,
+                    Заблокирован = u.IsBlocked ? "Да" : "Нет"
+                }).ToList();
+            dgvUsers.DataSource = null;
+            dgvUsers.DataSource = filtered;
+        }
+
+        private void BtnExport_Click(object sender, EventArgs e)
+        {
+            SaveFileDialog saveFileDialog = new SaveFileDialog();
+            saveFileDialog.Title = "Сохранить отчет";
+            saveFileDialog.Filter = "Текстовые файлы (*.txt)|*.txt";
+            saveFileDialog.DefaultExt = "txt";
+            saveFileDialog.FileName = "Отчет_пользователи_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            saveFileDialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+            if (saveFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    List<string> lines = new List<string>();
+                    lines.Add("═══════════════════════════════════════════════════════════════════════");
+                    lines.Add("           ОТЧЕТ ПО ПОЛЬЗОВАТЕЛЯМ ИНФОРМАЦИОННОЙ СИСТЕМЫ");
+                    lines.Add("═══════════════════════════════════════════════════════════════════════");
+                    lines.Add("");
+                    lines.Add("Дата и время формирования: " + DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss"));
+                    lines.Add("");
+                    lines.Add("┌────────────────────────┬──────────────┬────────────────┐");
+                    lines.Add("│         ЛОГИН          │     РОЛЬ     │  ЗАБЛОКИРОВАН  │");
+                    lines.Add("├────────────────────────┼──────────────┼────────────────┤");
+
+                    foreach (var user in users)
+                    {
+                        string blockedStatus = user.IsBlocked ? "ДА" : "НЕТ";
+                        lines.Add($"│ {user.Login,-22} │ {user.Role,-12} │ {blockedStatus,-14} │");
+                    }
+
+                    lines.Add("└────────────────────────┴──────────────┴────────────────┘");
+                    lines.Add("");
+                    lines.Add("Всего пользователей: " + users.Count);
+                    lines.Add("");
+                    lines.Add("═══════════════════════════════════════════════════════════════════════");
+                    lines.Add("Конец отчета");
+
+                    File.WriteAllLines(saveFileDialog.FileName, lines, System.Text.Encoding.UTF8);
+
+                    MessageBox.Show($"Отчет успешно сохранен!\n\nПапка: {Path.GetDirectoryName(saveFileDialog.FileName)}\nФайл: {Path.GetFileName(saveFileDialog.FileName)}",
+                        "Экспорт выполнен", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при сохранении файла:\n{ex.Message}",
+                        "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
         }
 
         private void InitializeAuthPanel()
@@ -112,7 +193,7 @@ namespace DEMO
 
             Label lblTitle = new Label()
             {
-                Text = "ООО \"Бургер плюс\" - Вход в систему",
+                Text = "ООО Бургер плюс - Вход в систему",
                 Font = new Font("Arial", 16, FontStyle.Bold),
                 Location = new Point(350, 20),
                 AutoSize = true,
@@ -127,12 +208,12 @@ namespace DEMO
 
             btnLogin = new Button() { Text = "ВОЙТИ", Location = new Point(370, 160), Width = 200, Height = 40, BackColor = Color.LightBlue, Font = new Font("Arial", 10, FontStyle.Bold) };
 
-            Label lblCaptchaTitle = new Label() { Text = "СОБЕРИТЕ ПАЗЛ ПРАВИЛЬНО:", Location = new Point(50, 230), AutoSize = true, Font = new Font("Arial", 10, FontStyle.Bold) };
-            lblCaptchaStatus = new Label() { Text = "❌ ПАЗЛ НЕ СОБРАН", Location = new Point(450, 260), AutoSize = true, ForeColor = Color.Red, Font = new Font("Arial", 10, FontStyle.Bold) };
+            Label lblCaptchaTitle = new Label() { Text = "СОБЕРИТЕ ПАЗЛ ПРАВИЛЬНО", Location = new Point(50, 230), AutoSize = true, Font = new Font("Arial", 10, FontStyle.Bold) };
+            lblCaptchaStatus = new Label() { Text = "ПАЗЛ НЕ СОБРАН", Location = new Point(450, 260), AutoSize = true, ForeColor = Color.Red, Font = new Font("Arial", 10, FontStyle.Bold) };
 
             btnResetCaptcha = new Button()
             {
-                Text = "🔄 СБРОСИТЬ ПАЗЛ",
+                Text = "СБРОСИТЬ ПАЗЛ",
                 Location = new Point(350, 520),
                 Width = 200,
                 Height = 35,
@@ -147,7 +228,6 @@ namespace DEMO
 
             for (int i = 0; i < 4; i++)
             {
-                int idx = i;
                 string path = Path.Combine(Application.StartupPath, "CaptchaImages", files[i]);
                 targetContents[i] = -1;
 
@@ -166,27 +246,9 @@ namespace DEMO
                 else
                     pieces[i].BackColor = Color.FromArgb(100 + i * 40, 150, 200);
 
-                pieces[i].MouseDown += (s, e) => pieces[idx].DoDragDrop(pieces[idx], DragDropEffects.Move);
+                int captureIndex = i;
+                pieces[i].MouseDown += (s, e) => pieces[captureIndex].DoDragDrop(pieces[captureIndex], DragDropEffects.Move);
                 pieces[i].DragEnter += (s, e) => e.Effect = DragDropEffects.Move;
-                pieces[i].DragDrop += (s, e) =>
-                {
-                    PictureBox dragged = (PictureBox)e.Data.GetData(typeof(PictureBox));
-                    if (dragged != null && dragged != pieces[idx])
-                    {
-                        for (int j = 0; j < 4; j++)
-                        {
-                            if (targetContents[j] == idx)
-                            {
-                                targetContents[j] = -1;
-                                targets[j].Image = null;
-                                targets[j].BackColor = Color.LightGray;
-                                break;
-                            }
-                        }
-                        pieces[idx].Visible = true;
-                        CheckCaptchaComplete();
-                    }
-                };
 
                 targets[i] = new PictureBox()
                 {
@@ -197,18 +259,19 @@ namespace DEMO
                     AllowDrop = true,
                     Tag = i
                 };
+
+                int targetIndex = i;
                 targets[i].DragEnter += (s, e) => e.Effect = DragDropEffects.Move;
                 targets[i].DragDrop += (s, e) =>
                 {
                     PictureBox dragged = (PictureBox)e.Data.GetData(typeof(PictureBox));
                     int draggedIndex = (int)dragged.Tag;
-                    int targetIndex = (int)targets[idx].Tag;
 
                     if (dragged != null && targetContents[targetIndex] == -1)
                     {
                         targets[targetIndex].Image = pieces[draggedIndex].Image;
                         targets[targetIndex].SizeMode = PictureBoxSizeMode.StretchImage;
-                        dragged.Visible = false;
+                        pieces[draggedIndex].Visible = false;
                         targetContents[targetIndex] = draggedIndex;
                         CheckCaptchaComplete();
                     }
@@ -250,18 +313,18 @@ namespace DEMO
 
                 if (isCorrect)
                 {
-                    lblCaptchaStatus.Text = "✅ ПАЗЛ СОБРАН ПРАВИЛЬНО!";
+                    lblCaptchaStatus.Text = "ПАЗЛ СОБРАН ПРАВИЛЬНО";
                     lblCaptchaStatus.ForeColor = Color.Green;
                 }
                 else
                 {
-                    lblCaptchaStatus.Text = "❌ ПАЗЛ СОБРАН НЕПРАВИЛЬНО!";
+                    lblCaptchaStatus.Text = "ПАЗЛ СОБРАН НЕПРАВИЛЬНО";
                     lblCaptchaStatus.ForeColor = Color.Red;
                 }
             }
             else
             {
-                lblCaptchaStatus.Text = "❌ ПАЗЛ НЕ СОБРАН";
+                lblCaptchaStatus.Text = "ПАЗЛ НЕ СОБРАН";
                 lblCaptchaStatus.ForeColor = Color.Red;
             }
         }
@@ -275,7 +338,7 @@ namespace DEMO
                 targets[i].BackColor = Color.LightGray;
                 targetContents[i] = -1;
             }
-            lblCaptchaStatus.Text = "❌ ПАЗЛ НЕ СОБРАН";
+            lblCaptchaStatus.Text = "ПАЗЛ НЕ СОБРАН";
             lblCaptchaStatus.ForeColor = Color.Red;
         }
 
@@ -296,55 +359,48 @@ namespace DEMO
             string login = txtLogin.Text.Trim();
             string password = txtPassword.Text;
 
-            if (!string.IsNullOrEmpty(login) && !IsValidLogin(login))
+            if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
             {
-                MessageBox.Show("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания!", "Ошибка валидации", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                consecutiveFailures++;
+                MessageBox.Show($"Введите логин и пароль. Попытка {consecutiveFailures} из 3", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                if (consecutiveFailures >= 3)
+                {
+                    MessageBox.Show("Превышено количество попыток входа. Форма будет сброшена.", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ResetForm();
+                }
                 return;
             }
 
-            if (!string.IsNullOrEmpty(login))
+            if (!IsValidLogin(login))
             {
-                var existingUser = users.FirstOrDefault(u => u.Login == login);
-                if (existingUser != null && existingUser.IsBlocked)
-                {
-                    MessageBox.Show("Ваша учетная запись заблокирована!\nОбратитесь к администратору.", "Доступ запрещен", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                MessageBox.Show("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var existingUser = users.FirstOrDefault(u => u.Login == login);
+            if (existingUser != null && existingUser.IsBlocked)
+            {
+                MessageBox.Show("Вы заблокированы. Обратитесь к администратору", "Доступ запрещен", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
             if (!IsCaptchaCorrect())
             {
-                failCount++;
-                int remaining = 3 - failCount;
-                MessageBox.Show($"Пазл собран НЕПРАВИЛЬНО!\nОсталось попыток: {remaining}", "Капча", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                consecutiveFailures++;
+                int remaining = 3 - consecutiveFailures;
+                MessageBox.Show($"Пазл собран НЕПРАВИЛЬНО. Осталось попыток: {remaining}", "Капча", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
-                if (failCount >= 3 && !string.IsNullOrEmpty(login))
+                if (consecutiveFailures >= 3 && existingUser != null)
                 {
                     BlockUser(login);
-                    MessageBox.Show($"Пользователь '{login}' заблокирован!", "Блокировка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    ResetCaptcha();
-                    failCount = 0;
+                    MessageBox.Show($"Пользователь {login} заблокирован за превышение попыток", "Блокировка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ResetForm();
                 }
-                else if (failCount >= 3)
+                else if (consecutiveFailures >= 3)
                 {
-                    MessageBox.Show("Превышено количество попыток. Учетная запись не заблокирована.", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    ResetCaptcha();
-                    failCount = 0;
-                }
-                return;
-            }
-
-            if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
-            {
-                failCount++;
-                int remaining = 3 - failCount;
-                MessageBox.Show($"Введите логин и пароль!\nОсталось попыток: {remaining}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                if (failCount >= 3)
-                {
-                    MessageBox.Show("Превышено количество попыток.", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    ResetCaptcha();
-                    failCount = 0;
+                    MessageBox.Show("Превышено количество попыток. Перезагрузка формы.", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ResetForm();
                 }
                 return;
             }
@@ -353,34 +409,35 @@ namespace DEMO
 
             if (!isValid)
             {
-                failCount++;
-                int remaining = 3 - failCount;
-                MessageBox.Show($"Неверный логин или пароль!\nОсталось попыток: {remaining}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                consecutiveFailures++;
+                int remaining = 3 - consecutiveFailures;
+                MessageBox.Show($"Неверный логин или пароль. Осталось попыток: {remaining}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
-                if (failCount >= 3)
+                if (consecutiveFailures >= 3 && existingUser != null)
                 {
                     BlockUser(login);
-                    MessageBox.Show($"Пользователь '{login}' заблокирован!", "Блокировка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    ResetCaptcha();
-                    failCount = 0;
+                    MessageBox.Show($"Пользователь {login} заблокирован за превышение попыток", "Блокировка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ResetForm();
                 }
                 return;
             }
 
-            if (isBlocked)
-            {
-                MessageBox.Show("Ваша учетная запись заблокирована!\nОбратитесь к администратору.", "Доступ запрещен", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            failCount = 0;
-            MessageBox.Show($"Вы успешно авторизовались!\nДобро пожаловать, {login}!", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            consecutiveFailures = 0;
+            MessageBox.Show($"Вы успешно авторизовались. Добро пожаловать, {login}", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             currentUser = login;
             currentRole = role;
 
             if (role == "Admin") ShowAdminPanel();
             else ShowUserPanel();
+        }
+
+        private void ResetForm()
+        {
+            txtLogin.Clear();
+            txtPassword.Clear();
+            ResetCaptcha();
+            consecutiveFailures = 0;
         }
 
         private void InitializeUserPanel()
@@ -401,25 +458,15 @@ namespace DEMO
             pnlAuth.Visible = false;
             pnlAdmin.Visible = false;
             pnlUser.Visible = true;
-            lblWelcome.Text = $"Добро пожаловать, {currentUser}!";
+            lblWelcome.Text = $"Добро пожаловать, {currentUser}";
         }
 
         private void InitializeAdminPanel()
         {
             pnlAdmin = new Panel() { Dock = DockStyle.Fill, AutoScroll = true };
 
-            Label lblTitle = new Label() { Text = "ООО \"Бургер плюс\" - Панель администратора", Font = new Font("Arial", 14, FontStyle.Bold), Location = new Point(20, 20), AutoSize = true };
-
-            dgvUsers = new DataGridView()
-            {
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Location = new Point(20, 60),
-                Size = new Size(550, 300),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
-            };
+            Label lblTitle = new Label() { Text = "ООО Бургер плюс - Панель администратора", Font = new Font("Arial", 14, FontStyle.Bold), Location = new Point(20, 20), AutoSize = true };
+            dgvUsers = new DataGridView() { Location = new Point(20, 60), Size = new Size(550, 300), AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, ReadOnly = true, AllowUserToAddRows = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect };
 
             Label lblNewLogin = new Label() { Text = "Логин:", Location = new Point(600, 60), AutoSize = true };
             txtNewLogin = new TextBox() { Location = new Point(680, 57), Width = 180 };
@@ -429,12 +476,20 @@ namespace DEMO
             cmbNewRole = new ComboBox() { Location = new Point(680, 137), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
             cmbNewRole.Items.AddRange(new string[] { "User", "Admin" });
             cmbNewRole.SelectedIndex = 0;
-            btnAddUser = new Button() { Text = "➕ ДОБАВИТЬ", Location = new Point(680, 180), Width = 180, Height = 35, BackColor = Color.LightGreen, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnAddUser = new Button() { Text = "ДОБАВИТЬ", Location = new Point(680, 180), Width = 180, Height = 35, BackColor = Color.LightGreen, Font = new Font("Arial", 9, FontStyle.Bold) };
 
-            btnUnblockUser = new Button() { Text = "🔓 РАЗБЛОКИРОВАТЬ", Location = new Point(20, 380), Width = 150, Height = 40, BackColor = Color.Gold, Font = new Font("Arial", 9, FontStyle.Bold) };
-            btnEditPassword = new Button() { Text = "🔑 СМЕНИТЬ ПАРОЛЬ", Location = new Point(190, 380), Width = 150, Height = 40, BackColor = Color.LightBlue, Font = new Font("Arial", 9, FontStyle.Bold) };
-            btnRefreshUsers = new Button() { Text = "🔄 ОБНОВИТЬ", Location = new Point(360, 380), Width = 150, Height = 40, BackColor = Color.LightBlue, Font = new Font("Arial", 9, FontStyle.Bold) };
-            btnAdminLogout = new Button() { Text = "ВЫЙТИ", Anchor = AnchorStyles.Bottom | AnchorStyles.Right, Location = new Point(700, 550), Width = 150, Height = 40, BackColor = Color.LightCoral, Font = new Font("Arial", 9, FontStyle.Bold) };
+            Label lblSearch = new Label() { Text = "Поиск:", Location = new Point(20, 380), AutoSize = true };
+            txtSearch = new TextBox() { Location = new Point(80, 377), Width = 200 };
+            btnSearch = new Button() { Text = "НАЙТИ", Location = new Point(290, 375), Size = new Size(80, 25), BackColor = Color.LightBlue, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnSearch.Click += BtnSearch_Click;
+
+            btnExport = new Button() { Text = "ЭКСПОРТ ОТЧЕТА", Location = new Point(400, 375), Size = new Size(150, 25), BackColor = Color.LightGreen, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnExport.Click += BtnExport_Click;
+
+            btnUnblockUser = new Button() { Text = "РАЗБЛОКИРОВАТЬ", Location = new Point(20, 420), Width = 150, Height = 40, BackColor = Color.Gold, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnEditPassword = new Button() { Text = "СМЕНИТЬ ПАРОЛЬ", Location = new Point(190, 420), Width = 150, Height = 40, BackColor = Color.LightBlue, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnRefreshUsers = new Button() { Text = "ОБНОВИТЬ", Location = new Point(360, 420), Width = 150, Height = 40, BackColor = Color.LightBlue, Font = new Font("Arial", 9, FontStyle.Bold) };
+            btnAdminLogout = new Button() { Text = "ВЫЙТИ", Location = new Point(700, 550), Width = 150, Height = 40, BackColor = Color.LightCoral, Font = new Font("Arial", 9, FontStyle.Bold) };
 
             pnlAdmin.Controls.Add(lblTitle);
             pnlAdmin.Controls.Add(dgvUsers);
@@ -445,16 +500,14 @@ namespace DEMO
             pnlAdmin.Controls.Add(lblNewRole);
             pnlAdmin.Controls.Add(cmbNewRole);
             pnlAdmin.Controls.Add(btnAddUser);
+            pnlAdmin.Controls.Add(lblSearch);
+            pnlAdmin.Controls.Add(txtSearch);
+            pnlAdmin.Controls.Add(btnSearch);
+            pnlAdmin.Controls.Add(btnExport);
             pnlAdmin.Controls.Add(btnUnblockUser);
             pnlAdmin.Controls.Add(btnEditPassword);
             pnlAdmin.Controls.Add(btnRefreshUsers);
             pnlAdmin.Controls.Add(btnAdminLogout);
-
-            this.Resize += (s, e) =>
-            {
-                dgvUsers.Size = new Size(this.ClientSize.Width - 370, 300);
-                btnAdminLogout.Location = new Point(this.ClientSize.Width - 170, this.ClientSize.Height - 100);
-            };
 
             btnAddUser.Click += BtnAddUser_Click;
             btnUnblockUser.Click += BtnUnblockUser_Click;
@@ -473,20 +526,20 @@ namespace DEMO
 
             if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
             {
-                MessageBox.Show("Заполните логин и пароль!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Заполните логин и пароль", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             if (!IsValidLogin(login))
             {
-                MessageBox.Show("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания!", "Ошибка валидации", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Логин может содержать только буквы, цифры, точки, дефисы и подчеркивания", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             try
             {
                 AddUser(login, password, role);
-                MessageBox.Show($"Пользователь '{login}' добавлен!", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show($"Пользователь {login} добавлен", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 txtNewLogin.Clear();
                 txtNewPassword.Clear();
                 LoadUsersToGrid();
@@ -499,22 +552,22 @@ namespace DEMO
 
         private void BtnUnblockUser_Click(object sender, EventArgs e)
         {
-            if (dgvUsers.SelectedRows.Count > 0)
+            if (dgvUsers.SelectedRows.Count > 0 && dgvUsers.SelectedRows[0].Cells[0].Value != null)
             {
                 string login = dgvUsers.SelectedRows[0].Cells[0].Value.ToString();
                 UnblockUser(login);
                 LoadUsersToGrid();
-                MessageBox.Show($"Пользователь '{login}' разблокирован!", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show($"Пользователь {login} разблокирован", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
-                MessageBox.Show("Выберите пользователя в таблице!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Выберите пользователя в таблице", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void BtnEditPassword_Click(object sender, EventArgs e)
         {
-            if (dgvUsers.SelectedRows.Count > 0)
+            if (dgvUsers.SelectedRows.Count > 0 && dgvUsers.SelectedRows[0].Cells[0].Value != null)
             {
                 string login = dgvUsers.SelectedRows[0].Cells[0].Value.ToString();
 
@@ -537,12 +590,12 @@ namespace DEMO
                     string newPassword = txtNewPass.Text.Trim();
                     if (string.IsNullOrEmpty(newPassword))
                     {
-                        MessageBox.Show("Введите новый пароль!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show("Введите новый пароль", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
                     ChangePassword(login, newPassword);
                     LoadUsersToGrid();
-                    MessageBox.Show($"Пароль для пользователя '{login}' изменен!", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show($"Пароль для пользователя {login} изменен", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     passwordForm.Close();
                 };
 
@@ -550,7 +603,7 @@ namespace DEMO
             }
             else
             {
-                MessageBox.Show("Выберите пользователя в таблице!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Выберите пользователя в таблице", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -560,8 +613,6 @@ namespace DEMO
             pnlUser.Visible = false;
             pnlAdmin.Visible = true;
             LoadUsersToGrid();
-            // Принудительно обновляем позиции
-            dgvUsers.Size = new Size(this.ClientSize.Width - 370, 300);
         }
 
         private void ShowAuthPanel()
@@ -572,7 +623,7 @@ namespace DEMO
             txtLogin.Clear();
             txtPassword.Clear();
             ResetCaptcha();
-            failCount = 0;
+            consecutiveFailures = 0;
         }
 
         private void Logout()
